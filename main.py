@@ -18,59 +18,92 @@ KEY_ESC = 27
 KEY_Q = 113
 KEY_P = 112
 IMAGE_SIZE = (960, 608)
+# Park Model Vision outside the default capture zone (top-left 960x600)
+MODEL_VISION_X = 900
+MODEL_VISION_Y = 520
+MODEL_VISION_W = 360
+MODEL_VISION_H = 240
 
 
 def main():
-    torch.cuda.set_device(0) # Allows PyTorch to use a CUDA GPU for inference.
+    print("main() entered", flush=True)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
+    print("loading model...", flush=True)
     drawer = AnnotationDrawer()
     inference_model = ObjectDetector("model/monster_class.pt")
+    print("model loaded", flush=True)
     bot = PathManager()
-    
-    game_dimensions = (1245, 768)
+
+    game_dimensions = (960, 600)
     game_area = {"top": 0, "left": 0, "width": game_dimensions[0], "height": game_dimensions[1]}
 
     stop_event = threading.Event()
     pause_event = threading.Event()
-    bot_thread = threading.Thread(target=bot.follow_pathing_queue, args=[stop_event, pause_event])
+    pause_event.set()  # start PAUSED
+    bot_thread = threading.Thread(
+        target=bot.follow_pathing_queue, args=[stop_event, pause_event], daemon=True
+    )
     bot_thread.start()
-    
-    while (key_press := cv2.waitKey(1)) != KEY_ESC:
-        try:
-            frame = get_frame_from_game(game_area)
-            
-            detections, class_names = inference_model.get_detections(frame, 0.6)
-            evaluator = PositionEvaluator(detections, class_names, 1)
-            graph = MovementGraph(IMAGE_SIZE, evaluator)
-            solution = graph.calculate_best_path(3)
-            
-            directions = edge_list_to_direction_list(solution)
-            bot.add_to_pathing_queue(directions)
-            
-            graph_drawer = GraphDrawer(graph.G)
-            draw_debug_boxes(frame, drawer, detections, class_names)
-            graph_drawer.draw_solution_to_frame(frame, solution)
-            
-            cv2.imshow("Model Vision", frame)
-            check_and_update_view_position(key_press, game_area)
-            handle_pause(key_press, pause_event)
-        except Exception:
-            stop_event.set()
-            raise Exception
 
-    stop_event.set()
-    cv2.destroyAllWindows()
+    cv2.namedWindow("Model Vision", cv2.WINDOW_NORMAL)
+    try:
+        cv2.resizeWindow("Model Vision", MODEL_VISION_W, MODEL_VISION_H)
+        cv2.moveWindow("Model Vision", MODEL_VISION_X, MODEL_VISION_Y)
+    except Exception as e:
+        print(f"Model Vision park warn: {e}", flush=True)
+    print("bot starting Model Vision loop (PAUSED — press p to unpause)", flush=True)
+
+    try:
+        while True:
+            key_press = cv2.waitKey(1) & 0xFF
+            if key_press == KEY_ESC:
+                print("ESC pressed, exiting", flush=True)
+                break
+            try:
+                try:
+                    frame = get_frame_from_game(game_area)
+                except Exception as grab_err:
+                    print(f"screenshot retry skip: {grab_err}", flush=True)
+                    continue
+
+                detections, class_names = inference_model.get_detections(frame, 0.6)
+                evaluator = PositionEvaluator(detections, class_names, 1)
+                graph = MovementGraph(IMAGE_SIZE, evaluator)
+                solution = graph.calculate_best_path(3)
+
+                directions = edge_list_to_direction_list(solution)
+                if not pause_event.is_set():
+                    bot.add_to_pathing_queue(directions)
+
+                graph_drawer = GraphDrawer(graph.G)
+                draw_debug_boxes(frame, drawer, detections, class_names)
+                graph_drawer.draw_solution_to_frame(frame, solution)
+
+                cv2.imshow("Model Vision", frame)
+                check_and_update_view_position(key_press, game_area)
+                handle_pause(key_press, pause_event, bot)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                stop_event.set()
+                bot.pause_safe()
+                raise
+    finally:
+        stop_event.set()
+        bot.pause_safe()
+        cv2.destroyAllWindows()
+        print("bot shutdown: keys released", flush=True)
     return 0
 
 
 def draw_debug_boxes(frame, drawer: AnnotationDrawer,
                      detections: List[Detection], class_names: List[str]):
-    """Draws the red and blue boxes depending on the type of entity detected."""
     for detection in detections:
         x1, y1, x2, y2 = detection.position
         label = class_names[detection.label]
         debug_info = f"{label}: {detection.confidence:.2f}"
-        color = (0, 0, 255) if label == "monster" else (255, 0, 0) # BGR
-        
+        color = (0, 0, 255) if label == "monster" else (255, 0, 0)
         drawer.draw_rectangle(frame, color, (x1, y1), (x2, y2))
         drawer.draw_text_with_background(frame, debug_info, (x1, y1))
 
@@ -83,24 +116,23 @@ def get_frame_from_game(bounding_box: Tuple[int, int, int, int]):
 
 
 def check_and_update_view_position(key_press, game_area):
-    """Updates the position at which screenshots will be captured from when the
-    letter Q is pressed.
-    """
     if key_press == KEY_Q:
         x, y = pyautogui.position()
         game_area["top"] = y
         game_area["left"] = x
-        
+        print(f"capture aligned to left={x} top={y}", flush=True)
 
-def handle_pause(key_press, pause: threading.Event):
-    """Updates the position at which screenshots will be captured from when the
-    letter Q is pressed.
-    """    
-    if key_press == KEY_P:       
-        if pause.is_set():
-            pause.clear()
-        else:
-            pause.set()
+
+def handle_pause(key_press, pause: threading.Event, bot: PathManager):
+    if key_press != KEY_P:
+        return
+    if pause.is_set():
+        pause.clear()
+        print("bot UNPAUSED", flush=True)
+    else:
+        pause.set()
+        bot.pause_safe()
+        print("bot PAUSED (keys released)", flush=True)
 
 
 if __name__ == "__main__":

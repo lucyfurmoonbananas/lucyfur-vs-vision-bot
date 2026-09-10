@@ -8,9 +8,9 @@ Rect: TypeAlias = Tuple[int, int, int, int]
 
 
 def distance_to_point(point_a: Point, point_b: Point) -> float:
-    x = abs(point_a[0] - point_b[0])
-    y = abs(point_a[1] - point_b[1])    
-    return math.sqrt((x*x) + (y*y))
+    x = abs(float(point_a[0]) - float(point_b[0]))
+    y = abs(float(point_a[1]) - float(point_b[1]))
+    return math.sqrt((x * x) + (y * y))
 
 
 def middle_point(point_a: Point, point_b: Point) -> Point:
