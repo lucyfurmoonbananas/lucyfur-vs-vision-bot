@@ -1,22 +1,51 @@
 import atexit
-import time
+import os
+import shutil
+import subprocess
 import threading
+import time
 from queue import Queue
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from pynput.keyboard import Controller, Key, KeyCode
 
 from bot.utilities import Point
 
 
-# Default Vampire Survivors binds are WASD. Do not force arrows.
-# Release both letter and arrow keys so a prior arrow workaround cannot stick.
-MOVEMENT_KEYS = {
-    "up": "w",
-    "down": "s",
-    "left": "a",
-    "right": "d",
-}
+# Direction tokens from pathing; map to Vampire Survivors default WASD binds.
+# Optional VS_MOVE_KEYS=arrows maps directions to arrow keys instead.
+_MOVE_MODE = os.environ.get("VS_MOVE_KEYS", "wasd").strip().lower()
+if _MOVE_MODE in ("arrows", "arrow", "arrow_keys"):
+    MOVEMENT_KEYS = {
+        "up": Key.up,
+        "down": Key.down,
+        "left": Key.left,
+        "right": Key.right,
+    }
+    XDOTOOL_KEY_MAP = {
+        "up": "Up",
+        "down": "Down",
+        "left": "Left",
+        "right": "Right",
+    }
+else:
+    MOVEMENT_KEYS = {
+        "up": "w",
+        "down": "s",
+        "left": "a",
+        "right": "d",
+    }
+    XDOTOOL_KEY_MAP = {
+        "up": "w",
+        "down": "s",
+        "left": "a",
+        "right": "d",
+    }
+
+# Input backend: pynput | xdotool. Default xdotool on this Steam/Linux box.
+_INPUT_BACKEND = os.environ.get("VS_INPUT", "xdotool").strip().lower()
+if _INPUT_BACKEND not in ("pynput", "xdotool"):
+    _INPUT_BACKEND = "xdotool"
 
 _ALL_RELEASE_KEYS: List[Union[str, Key]] = [
     "w", "a", "s", "d",
@@ -36,16 +65,121 @@ class PathManager:
         self.input = Controller()
         self.move_time = pixels_moved / player_speed
         self._held = None
+        self._backend = _INPUT_BACKEND
+        self._vs_wid: Optional[str] = None
+        self._focused_once = False
         atexit.register(self.release_all_keys)
+        print(
+            f"PathManager backend={self._backend} move_mode={_MOVE_MODE} "
+            f"keys={list(MOVEMENT_KEYS.values())}",
+            flush=True,
+        )
+
+    def _xdotool(self, *args) -> None:
+        if not shutil.which("xdotool"):
+            return
+        env = os.environ.copy()
+        env.setdefault("DISPLAY", ":6")
+        try:
+            subprocess.run(
+                ["xdotool", *args],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                timeout=2,
+            )
+        except Exception:
+            pass
+
+    def _resolve_vs_window(self) -> Optional[str]:
+        if self._vs_wid:
+            return self._vs_wid
+        if not shutil.which("xdotool"):
+            return None
+        env = os.environ.copy()
+        env.setdefault("DISPLAY", ":6")
+        try:
+            out = (
+                subprocess.check_output(
+                    ["xdotool", "search", "--name", "Vampire Survivors"],
+                    env=env,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2,
+                )
+                .decode()
+                .strip()
+                .splitlines()
+            )
+            if out:
+                self._vs_wid = out[0]
+                return self._vs_wid
+        except Exception:
+            return None
+        return None
+
+    def ensure_vs_focus_once(self) -> None:
+        """Focus VS once per live session. No Steam raise loops."""
+        if self._focused_once:
+            return
+        wid = self._resolve_vs_window()
+        if not wid:
+            return
+        self._xdotool("windowactivate", "--sync", wid)
+        self._focused_once = True
+
+    def _press_direction(self, direction: str) -> None:
+        if self._backend == "xdotool":
+            self.ensure_vs_focus_once()
+            xt = XDOTOOL_KEY_MAP.get(direction)
+            if not xt:
+                return
+            if self._vs_wid:
+                self._xdotool("keydown", "--window", self._vs_wid, xt)
+            else:
+                self._xdotool("keydown", xt)
+            return
+        key = MOVEMENT_KEYS.get(direction)
+        if key is None:
+            return
+        self.input.press(_as_key(key))
+
+    def _release_direction(self, direction: str) -> None:
+        if self._backend == "xdotool":
+            xt = XDOTOOL_KEY_MAP.get(direction)
+            if xt:
+                if self._vs_wid:
+                    self._xdotool("keyup", "--window", self._vs_wid, xt)
+                else:
+                    self._xdotool("keyup", xt)
+            return
+        key = MOVEMENT_KEYS.get(direction)
+        if key is None:
+            return
+        try:
+            self.input.release(_as_key(key))
+        except Exception:
+            pass
 
     def release_all_keys(self):
         """Release any held movement key. Safe when paused or exiting."""
         held = self._held
         self._held = None
-        keys = list(_ALL_RELEASE_KEYS)
-        if held is not None and held not in keys:
-            keys.append(held)
-        for key in keys:
+        for direction in list(MOVEMENT_KEYS.keys()):
+            try:
+                self._release_direction(direction)
+            except Exception:
+                pass
+        if held is not None and held not in MOVEMENT_KEYS:
+            try:
+                self._release_direction(held)
+            except Exception:
+                pass
+        # Belt-and-suspenders: clear WASD and arrows via both backends
+        if shutil.which("xdotool"):
+            for xt in ("w", "a", "s", "d", "W", "A", "S", "D", "Up", "Down", "Left", "Right"):
+                self._xdotool("keyup", xt)
+        for key in _ALL_RELEASE_KEYS:
             try:
                 self.input.release(_as_key(key))
             except Exception:
@@ -76,14 +210,12 @@ class PathManager:
                 if pause_event.is_set() or stop_event.is_set():
                     self.pause_safe()
                     continue
-
-                key = MOVEMENT_KEYS.get(next_movement)
-                if key is None:
+                if next_movement not in MOVEMENT_KEYS:
                     continue
-                press_key = _as_key(key)
+
                 try:
-                    self._held = key
-                    self.input.press(press_key)
+                    self._held = next_movement
+                    self._press_direction(next_movement)
                     # Slice the hold so pause/stop can interrupt sooner
                     end = time.monotonic() + self.move_time
                     while time.monotonic() < end:
@@ -92,12 +224,11 @@ class PathManager:
                         time.sleep(min(0.02, end - time.monotonic()))
                 finally:
                     try:
-                        self.input.release(press_key)
+                        self._release_direction(next_movement)
                     except Exception:
                         pass
-                    if self._held == key:
+                    if self._held == next_movement:
                         self._held = None
-                    # Belt-and-suspenders: never leave WASD/arrows down
                     if pause_event.is_set() or stop_event.is_set():
                         self.release_all_keys()
         finally:
