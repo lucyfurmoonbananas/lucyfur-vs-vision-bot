@@ -3,12 +3,18 @@ import threading
 from queue import Queue
 from typing import List, Tuple
 
-from pynput.keyboard import Controller
+from pynput.keyboard import Controller, Key
 
 from bot.utilities import Point
 
 
-MOVEMENT_KEYS = ("w", "a", "s", "d")
+# Movement uses arrow keys (WASD does not move on this Steam/Linux setup)
+MOVEMENT_KEYS = {
+    "up": Key.up,
+    "down": Key.down,
+    "left": Key.left,
+    "right": Key.right,
+}
 
 
 class PathManager:
@@ -22,8 +28,8 @@ class PathManager:
         """Release any held movement key. Safe when paused or exiting."""
         held = self._held
         self._held = None
-        keys = list(MOVEMENT_KEYS)
-        if held and held not in keys:
+        keys = list(MOVEMENT_KEYS.values())
+        if held is not None and held not in keys:
             keys.append(held)
         for key in keys:
             try:
@@ -57,21 +63,24 @@ class PathManager:
                     self.pause_safe()
                     continue
 
+                key = MOVEMENT_KEYS.get(next_movement)
+                if key is None:
+                    continue
                 try:
-                    self._held = next_movement
-                    self.input.press(next_movement)
+                    self._held = key
+                    self.input.press(key)
                     time.sleep(self.move_time)
                 finally:
                     try:
-                        self.input.release(next_movement)
+                        self.input.release(key)
                     except Exception:
                         pass
-                    if self._held == next_movement:
+                    if self._held == key:
                         self._held = None
         finally:
             self.pause_safe()
 
-    def add_to_pathing_queue(self, movements: List[chr]):
+    def add_to_pathing_queue(self, movements: List[str]):
         if self.__path_queue.qsize() != 0:
             return False
         for movement in movements:
@@ -86,13 +95,13 @@ def edge_list_to_direction_list(edges: List[Tuple[Point, Point]]):
         point_a, point_b = edge[:2]
 
         if point_b[0] - point_a[0] > 0:
-            directions.append("d")
+            directions.append("right")
         elif point_b[0] - point_a[0] < 0:
-            directions.append("a")
+            directions.append("left")
         elif point_b[1] - point_a[1] > 0:
-            directions.append("s")
+            directions.append("down")
         elif point_b[1] - point_a[1] < 0:
-            directions.append("w")
+            directions.append("up")
     return directions
 
 

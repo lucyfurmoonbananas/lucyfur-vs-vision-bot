@@ -49,10 +49,14 @@ def screenshot(bounding_box: Any) -> np.ndarray:
 
 
 def grab_every_n_seconds(n: int, bounding_box: Tuple[int, int, int, int]):
+    import cv2
+    from pathlib import Path
+    Path("screenshots").mkdir(exist_ok=True)
     for i in range(0, 500):
         time.sleep(n)
         image = screenshot(bounding_box)
-        mss.tools.to_png(image.rgb, image.size, output=f"screenshots/screenshot_{i}.png")
+        # screenshot() returns a BGRA numpy array
+        cv2.imwrite(f"screenshots/screenshot_{i}.png", image)
 
 
 def main():

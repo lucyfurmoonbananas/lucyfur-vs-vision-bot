@@ -40,7 +40,7 @@ def main():
 
     stop_event = threading.Event()
     pause_event = threading.Event()
-    pause_event.set()  # start PAUSED
+    pause_event.set()  # start PAUSED — unpause only after clock live
     bot_thread = threading.Thread(
         target=bot.follow_pathing_queue, args=[stop_event, pause_event], daemon=True
     )
