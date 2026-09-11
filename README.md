@@ -30,6 +30,18 @@ After a short period of time, a window will open showing you what the bot is cur
 
 To pause the bot, stopping it from controlling your keyboard, press ``p`` with the "model vision" window active.
 
+## Movement keys (WASD)
+
+Vampire Survivors defaults to **WASD**. This bot sends WASD by default.
+
+If Steam Input or Proton eats WASD on Linux, try first:
+1. Steam → Vampire Survivors → Properties → Controller → **Disable Steam Input**.
+2. Click the Vampire Survivors window so it has focus before you unpause (`p`).
+3. Only if still broken, run with arrow fallback: `VS_MOVE_KEYS=arrows python main.py`
+
+Pause (`p`) and shutdown always release movement keys so they cannot stick.
+
+
 Please note that all of the previous commands are case-sensitive.
 
 **Testing**

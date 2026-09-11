@@ -1,20 +1,38 @@
+import os
 import time
 import threading
 from queue import Queue
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
-from pynput.keyboard import Controller, Key
+from pynput.keyboard import Controller, Key, KeyCode
 
 from bot.utilities import Point
 
 
-# Movement uses arrow keys (WASD does not move on this Steam/Linux setup)
-MOVEMENT_KEYS = {
+# Default Vampire Survivors binds are WASD.
+# Set VS_MOVE_KEYS=arrows only as an optional Steam/Linux fallback.
+_MODE = os.environ.get("VS_MOVE_KEYS", "wasd").strip().lower()
+
+_WASD: Dict[str, object] = {
+    "up": KeyCode.from_char("w"),
+    "down": KeyCode.from_char("s"),
+    "left": KeyCode.from_char("a"),
+    "right": KeyCode.from_char("d"),
+}
+
+_ARROWS: Dict[str, object] = {
     "up": Key.up,
     "down": Key.down,
     "left": Key.left,
     "right": Key.right,
 }
+
+MOVEMENT_KEYS = _ARROWS if _MODE in ("arrows", "arrow") else _WASD
+
+# Always release both layouts on pause/stop so leftover binds cannot stick.
+_ALL_RELEASE_KEYS = list(
+    dict.fromkeys(list(_WASD.values()) + list(_ARROWS.values()))
+)
 
 
 class PathManager:
@@ -28,7 +46,7 @@ class PathManager:
         """Release any held movement key. Safe when paused or exiting."""
         held = self._held
         self._held = None
-        keys = list(MOVEMENT_KEYS.values())
+        keys = list(_ALL_RELEASE_KEYS)
         if held is not None and held not in keys:
             keys.append(held)
         for key in keys:
