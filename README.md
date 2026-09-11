@@ -39,3 +39,20 @@ If you want to run one of the testing routines, execute the following command on
 ``python testing.py <testing-code> <arg>``
 
 where ``<testing-code>`` representes a numerical value between 1 and 3, indicating which test should be ran, and ``<arg>`` is any additional argument necessary for running the command. For more information, check ``testing.py``.
+
+## Movement keys (WASD)
+
+Vampire Survivors default movement is **WASD**. This bot sends WASD, not arrow keys.
+
+If keys seem dead under Steam on Linux, the OpenCV **Model Vision** window often stole focus. The bot now tries to activate the game window with `xdotool` before each move when available.
+
+Optional environment variables:
+
+- `VS_MOVE_BACKEND=pynput` (default) or `xdotool`
+- `VS_GAME_WINDOW_NAME=Vampire Survivors` (window title substring)
+
+Install `xdotool` for more reliable window targeting:
+
+``sudo apt-get install -y xdotool``
+
+Press **p** in Model Vision to pause. Pause clears the path queue and releases all movement keys.

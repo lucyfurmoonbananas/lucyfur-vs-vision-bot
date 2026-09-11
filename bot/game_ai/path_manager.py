@@ -1,20 +1,30 @@
+import os
+import shutil
+import subprocess
 import time
 import threading
 from queue import Queue
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from pynput.keyboard import Controller, Key
+from pynput.keyboard import Controller, KeyCode
 
 from bot.utilities import Point
 
 
-# Movement uses arrow keys (WASD does not move on this Steam/Linux setup)
-MOVEMENT_KEYS = {
-    "up": Key.up,
-    "down": Key.down,
-    "left": Key.left,
-    "right": Key.right,
+# Default VS movement binds are WASD. Map logical directions to those keys.
+# Do not force arrow keys; that was only a temporary Steam/Linux workaround.
+MOVEMENT_CHARS: Dict[str, str] = {
+    "up": "w",
+    "down": "s",
+    "left": "a",
+    "right": "d",
 }
+
+# Optional: target the game window so OpenCV "Model Vision" focus does not eat keys.
+# VS_MOVE_BACKEND=pynput (default) | xdotool
+# VS_GAME_WINDOW_NAME substring match, default "Vampire Survivors"
+MOVE_BACKEND = os.environ.get("VS_MOVE_BACKEND", "pynput").strip().lower()
+GAME_WINDOW_NAME = os.environ.get("VS_GAME_WINDOW_NAME", "Vampire Survivors")
 
 
 class PathManager:
@@ -22,20 +32,79 @@ class PathManager:
         self.__path_queue = Queue()
         self.input = Controller()
         self.move_time = pixels_moved / player_speed
-        self._held = None
+        self._held: Optional[str] = None
+        self._xdotool = shutil.which("xdotool")
+        self._warned_xdotool = False
+
+    def _focus_game_window(self) -> bool:
+        """Best-effort focus of the Vampire Survivors window before key inject."""
+        if not self._xdotool:
+            return False
+        try:
+            out = subprocess.check_output(
+                ["xdotool", "search", "--name", GAME_WINDOW_NAME],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=1.0,
+            )
+            wid = out.strip().splitlines()[-1].strip()
+            if not wid:
+                return False
+            subprocess.check_call(
+                ["xdotool", "windowactivate", "--sync", wid],
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+            )
+            return True
+        except Exception:
+            return False
+
+    def _press_char(self, ch: str) -> None:
+        if MOVE_BACKEND == "xdotool" and self._xdotool:
+            self._focus_game_window()
+            subprocess.check_call(
+                ["xdotool", "keydown", ch],
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+            )
+            return
+        if MOVE_BACKEND == "xdotool" and not self._xdotool and not self._warned_xdotool:
+            print("xdotool missing; falling back to pynput for WASD", flush=True)
+            self._warned_xdotool = True
+        # pynput path: try to focus game first so Model Vision does not eat WASD
+        self._focus_game_window()
+        self.input.press(KeyCode.from_char(ch))
+
+    def _release_char(self, ch: str) -> None:
+        if MOVE_BACKEND == "xdotool" and self._xdotool:
+            try:
+                subprocess.check_call(
+                    ["xdotool", "keyup", ch],
+                    stderr=subprocess.DEVNULL,
+                    timeout=1.0,
+                )
+            except Exception:
+                pass
+            return
+        try:
+            self.input.release(KeyCode.from_char(ch))
+        except Exception:
+            pass
+        # Also release bare string form some pynput builds accept
+        try:
+            self.input.release(ch)
+        except Exception:
+            pass
 
     def release_all_keys(self):
         """Release any held movement key. Safe when paused or exiting."""
         held = self._held
         self._held = None
-        keys = list(MOVEMENT_KEYS.values())
-        if held is not None and held not in keys:
-            keys.append(held)
-        for key in keys:
-            try:
-                self.input.release(key)
-            except Exception:
-                pass
+        chars = list(MOVEMENT_CHARS.values())
+        if held is not None and held not in chars:
+            chars.append(held)
+        for ch in chars:
+            self._release_char(ch)
 
     def clear_queue(self):
         while not self.__path_queue.empty():
@@ -63,19 +132,16 @@ class PathManager:
                     self.pause_safe()
                     continue
 
-                key = MOVEMENT_KEYS.get(next_movement)
-                if key is None:
+                ch = MOVEMENT_CHARS.get(next_movement)
+                if ch is None:
                     continue
                 try:
-                    self._held = key
-                    self.input.press(key)
+                    self._held = ch
+                    self._press_char(ch)
                     time.sleep(self.move_time)
                 finally:
-                    try:
-                        self.input.release(key)
-                    except Exception:
-                        pass
-                    if self._held == key:
+                    self._release_char(ch)
+                    if self._held == ch:
                         self._held = None
         finally:
             self.pause_safe()
@@ -84,7 +150,7 @@ class PathManager:
         if self.__path_queue.qsize() != 0:
             return False
         for movement in movements:
-            if movement in MOVEMENT_KEYS:
+            if movement in MOVEMENT_CHARS:
                 self.__path_queue.put(movement)
         return True
 
