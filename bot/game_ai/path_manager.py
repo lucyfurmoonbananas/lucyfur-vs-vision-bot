@@ -1,20 +1,33 @@
+import atexit
 import time
 import threading
 from queue import Queue
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
-from pynput.keyboard import Controller, Key
+from pynput.keyboard import Controller, Key, KeyCode
 
 from bot.utilities import Point
 
 
-# Movement uses arrow keys (WASD does not move on this Steam/Linux setup)
+# Default Vampire Survivors binds are WASD. Do not force arrows.
+# Release both letter and arrow keys so a prior arrow workaround cannot stick.
 MOVEMENT_KEYS = {
-    "up": Key.up,
-    "down": Key.down,
-    "left": Key.left,
-    "right": Key.right,
+    "up": "w",
+    "down": "s",
+    "left": "a",
+    "right": "d",
 }
+
+_ALL_RELEASE_KEYS: List[Union[str, Key]] = [
+    "w", "a", "s", "d",
+    Key.up, Key.down, Key.left, Key.right,
+]
+
+
+def _as_key(key: Union[str, Key, KeyCode]):
+    if isinstance(key, str):
+        return KeyCode.from_char(key)
+    return key
 
 
 class PathManager:
@@ -23,17 +36,18 @@ class PathManager:
         self.input = Controller()
         self.move_time = pixels_moved / player_speed
         self._held = None
+        atexit.register(self.release_all_keys)
 
     def release_all_keys(self):
         """Release any held movement key. Safe when paused or exiting."""
         held = self._held
         self._held = None
-        keys = list(MOVEMENT_KEYS.values())
+        keys = list(_ALL_RELEASE_KEYS)
         if held is not None and held not in keys:
             keys.append(held)
         for key in keys:
             try:
-                self.input.release(key)
+                self.input.release(_as_key(key))
             except Exception:
                 pass
 
@@ -66,17 +80,26 @@ class PathManager:
                 key = MOVEMENT_KEYS.get(next_movement)
                 if key is None:
                     continue
+                press_key = _as_key(key)
                 try:
                     self._held = key
-                    self.input.press(key)
-                    time.sleep(self.move_time)
+                    self.input.press(press_key)
+                    # Slice the hold so pause/stop can interrupt sooner
+                    end = time.monotonic() + self.move_time
+                    while time.monotonic() < end:
+                        if pause_event.is_set() or stop_event.is_set():
+                            break
+                        time.sleep(min(0.02, end - time.monotonic()))
                 finally:
                     try:
-                        self.input.release(key)
+                        self.input.release(press_key)
                     except Exception:
                         pass
                     if self._held == key:
                         self._held = None
+                    # Belt-and-suspenders: never leave WASD/arrows down
+                    if pause_event.is_set() or stop_event.is_set():
+                        self.release_all_keys()
         finally:
             self.pause_safe()
 
