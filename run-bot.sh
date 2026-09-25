@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /workspace/vampire-survivors-bot
+cd "$(dirname "$0")"
 export DISPLAY=:6
 export QT_QPA_PLATFORM=xcb
 export PYTHONUNBUFFERED=1
