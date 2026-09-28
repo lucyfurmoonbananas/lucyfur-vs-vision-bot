@@ -78,15 +78,12 @@ class PathManager:
     def _xdotool(self, *args) -> None:
         if not shutil.which("xdotool"):
             return
-        env = os.environ.copy()
-        env.setdefault("DISPLAY", ":6")
         try:
             subprocess.run(
                 ["xdotool", *args],
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                env=env,
                 timeout=2,
             )
         except Exception:
@@ -97,13 +94,10 @@ class PathManager:
             return self._vs_wid
         if not shutil.which("xdotool"):
             return None
-        env = os.environ.copy()
-        env.setdefault("DISPLAY", ":6")
         try:
             out = (
                 subprocess.check_output(
                     ["xdotool", "search", "--name", "Vampire Survivors"],
-                    env=env,
                     stderr=subprocess.DEVNULL,
                     timeout=2,
                 )
