@@ -6,7 +6,6 @@ from bot.computer_vision.object_detection import Detection
 from bot.utilities import Point, distance_to_point
 
 
-MAGNET_RANGE = 40
 RUNE_VALUE = 0.3
 MAX_RISK_DISTANCE = 25
 
@@ -16,7 +15,9 @@ class PositionEvaluator():
         monsters = [(np.mean([x.position[0], x.position[2]]), np.mean([x.position[1], x.position[3]]))
                     for x in detections
                     if class_names[x.label] == "monster"]
-        runes = [x.position for x in detections if class_names[x.label] == "rune"]
+        runes = [(np.mean([x.position[0], x.position[2]]), np.mean([x.position[1], x.position[3]]))
+                 for x in detections
+                 if class_names[x.label] == "rune"]
         
         self.monsters = sample(monsters, int(sampling_rate * len(monsters)))
         self.runes = sample(runes, int(sampling_rate * len(runes)))
