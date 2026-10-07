@@ -61,34 +61,27 @@ def main():
                 print("ESC pressed, exiting", flush=True)
                 break
             try:
-                try:
-                    frame = get_frame_from_game(game_area)
-                except Exception as grab_err:
-                    print(f"screenshot retry skip: {grab_err}", flush=True)
-                    continue
+                frame = get_frame_from_game(game_area)
+            except Exception as grab_err:
+                print(f"screenshot retry skip: {grab_err}", flush=True)
+                continue
 
-                detections, class_names = inference_model.get_detections(frame, 0.6)
-                evaluator = PositionEvaluator(detections, class_names, 1)
-                graph = MovementGraph(IMAGE_SIZE, evaluator)
-                solution = graph.calculate_best_path(3)
+            detections, class_names = inference_model.get_detections(frame, 0.6)
+            evaluator = PositionEvaluator(detections, class_names, 1)
+            graph = MovementGraph(IMAGE_SIZE, evaluator)
+            solution = graph.calculate_best_path(3)
 
-                directions = edge_list_to_direction_list(solution)
-                if not pause_event.is_set():
-                    bot.add_to_pathing_queue(directions)
+            directions = edge_list_to_direction_list(solution)
+            if not pause_event.is_set():
+                bot.add_to_pathing_queue(directions)
 
-                graph_drawer = GraphDrawer(graph.G)
-                draw_debug_boxes(frame, drawer, detections, class_names)
-                graph_drawer.draw_solution_to_frame(frame, solution)
+            graph_drawer = GraphDrawer(graph.G)
+            draw_debug_boxes(frame, drawer, detections, class_names)
+            graph_drawer.draw_solution_to_frame(frame, solution)
 
-                cv2.imshow("Model Vision", frame)
-                check_and_update_view_position(key_press, game_area)
-                handle_pause(key_press, pause_event, bot)
-            except Exception:
-                import traceback
-                traceback.print_exc()
-                stop_event.set()
-                bot.pause_safe()
-                raise
+            cv2.imshow("Model Vision", frame)
+            check_and_update_view_position(key_press, game_area)
+            handle_pause(key_press, pause_event, bot)
     finally:
         stop_event.set()
         bot.pause_safe()
