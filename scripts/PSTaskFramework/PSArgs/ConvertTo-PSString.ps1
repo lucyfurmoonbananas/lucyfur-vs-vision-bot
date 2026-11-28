@@ -50,7 +50,7 @@ function ConvertTo-PSString {
         }
 
         if ($InputObject -is [bool] -OR $InputObject -is [switch]) { return '$' + $InputObject.ToString() }
-        if ($InputObject -is [int] -OR $InputObject -is [int64] -OR $InputObject -is [double]) { return $InputObject.ToString() }
+        if ($InputObject -is [int] -OR $InputObject -is [int64] -OR $InputObject -is [double]) { return $InputObject.ToString([cultureinfo]::InvariantCulture) }
         if ($InputObject -is [datetime] -OR $InputObject -is [System.DateTimeOffset]) { return "'" + $InputObject.ToString('O') + "'" }
 
         if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
